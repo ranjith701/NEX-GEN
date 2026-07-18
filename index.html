@@ -3,230 +3,441 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RK Mobiles - Terminal Access</title>
+    <title>RK Mobiles - Terminal Console</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React Core Libraries -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel Compiler -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Firebase Global Script Libraries (Browser Version) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="bg-gray-50 text-gray-800 min-h-screen">
 
     <div id="root"></div>
 
     <script type="text/babel">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-        // ================= CHANGE THIS WITH YOUR FIREBASE CREDENTIALS =================
+        // Realized Firebase instances using safe browser context
         const firebaseConfig = {
-  apiKey: "AIzaSyD34O_POEwS40AhVi01QLWIkYbU9Si6E7Q",
-  authDomain: "nex-gen-46e49.firebaseapp.com",
-  projectId: "nex-gen-46e49",
-  storageBucket: "nex-gen-46e49.firebasestorage.app",
-  messagingSenderId: "745169266255",
-  appId: "1:745169266255:web:6798e993ff7c1027da6c3a"
-};
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+            apiKey: "AIzaSyD34O_POEwS40AhVi01QLWIkYbU9Si6E7Q",
+            authDomain: "nex-gen-46e49.firebaseapp.com",
+            projectId: "nex-gen-46e49",
+            storageBucket: "nex-gen-46e49.firebasestorage.app",
+            messagingSenderId: "745169266255",
+            appId: "1:745169266255:web:6798e993ff7c1027da6c3a"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
 
         function App() {
             const [isFirstTimeSetup, setIsFirstTimeSetup] = React.useState(false);
-            const [currentView, setCurrentView] = React.useState('login'); // 'login', 'setup-admin', 'dashboard'
+            const [currentRole, setCurrentRole] = React.useState('login'); 
+            const [activeTab, setActiveTab] = React.useState('');
             const [rememberMe, setRememberMe] = React.useState(false);
             const [loginError, setLoginError] = React.useState('');
             
-            // Input references
-            const [usernameInput, setUsernameInput] = React.useState('');
+            const [identifierInput, setIdentifierInput] = React.useState('');
             const [passwordInput, setPasswordInput] = React.useState('');
 
-            // Setup Form States
-            const [adminType, setAdminType] = React.useState('email'); // 'email' or 'mobile'
+            const [adminType, setAdminType] = React.useState('email');
             const [adminCredential, setAdminCredential] = React.useState('');
             const [adminPassword, setAdminPassword] = React.useState('');
 
-            // Check if any admin exists in database on startup
+            const [allJobs, setAllJobs] = React.useState([]);
+            const [technicians, setTechnicians] = React.useState([]);
+            const [usersList, setUsersList] = React.useState([]);
+            
+            const [formData, setFormData] = React.useState({ brand:'', model:'', condition:'', cost:'', custPhone:'', custName:'', issueDesc:'' });
+
             React.useEffect(() => {
-                const checkAdminStatus = async () => {
-                    const querySnapshot = await getDocs(collection(db, "users"));
-                    // If no users exist in the collection, initialize first-time entry parameters
-                    if (querySnapshot.empty) {
-                        setIsFirstTimeSetup(true);
+                const checkSystemStatus = async () => {
+                    try {
+                        const snap = await db.collection("users").get();
+                        if (snap.empty) setIsFirstTimeSetup(true);
+                    } catch (e) {
+                        console.error("Database connection issue. Check Firestore setup:", e);
                     }
                 };
-                checkAdminStatus();
+                checkSystemStatus();
             }, []);
 
-            // Master Auth Login Router
+            React.useEffect(() => {
+                return auth.onAuthStateChanged(async (currentUser) => {
+                    if (currentUser) {
+                        const userDocKey = currentUser.email.split('@')[0];
+                        const userDoc = await db.collection("users").doc(userDocKey).get();
+                        if (userDoc.exists) {
+                            const data = userDoc.data();
+                            setCurrentRole(data.role);
+                            if (data.role === 'admin' || data.role === 'developer') setActiveTab('create-job');
+                            else if (data.role === 'technician') setActiveTab('available-jobs');
+                        }
+                    } else {
+                        setCurrentRole('login');
+                        setActiveTab('');
+                    }
+                });
+            }, []);
+
+            React.useEffect(() => {
+                if (currentRole === 'login' || currentRole === 'customer') return;
+
+                const unsubscribeJobs = db.collection("repair_jobs").onSnapshot((snap) => {
+                    setAllJobs(snap.docs.map(d => d.data()));
+                });
+
+                const unsubscribeUsers = db.collection("users").onSnapshot((snap) => {
+                    const users = snap.docs.map(d => d.data());
+                    setUsersList(users);
+                    setTechnicians(users.filter(u => u.role === 'technician'));
+                });
+
+                return () => { unsubscribeJobs(); unsubscribeUsers(); };
+            }, [currentRole]);
+
             const handleTerminalLogin = async (e) => {
                 e.preventDefault();
                 setLoginError('');
+                const identity = identifierInput.trim();
 
-                const cleanUser = usernameInput.trim();
-                const cleanPass = passwordInput;
-
-                // 1. First time override logic pathway
                 if (isFirstTimeSetup) {
-                    if (cleanUser === 'admin' && cleanPass === 'admin') {
-                        setCurrentView('setup-admin'); // Force redirect to registration screen
+                    if (identity === 'admin' && passwordInput === 'admin') {
+                        setCurrentRole('setup-admin');
                         return;
                     } else {
-                        setLoginError('First-time setup active. Use fallback administrative credentials.');
+                        setLoginError('First-time setup active. Log in with admin/admin.');
                         return;
                     }
                 }
 
-                // 2. Standard production login pathway (Email & Phone normalization)
-                let targetLoginCredential = cleanUser;
-                if (/^\d{10}$/.test(cleanUser)) {
-                    targetLoginCredential = `${cleanUser}@rkmobiles.com`;
+                let dynamicLoginTarget = identity;
+                if (/^\d{10}$/.test(identity)) {
+                    dynamicLoginTarget = `${identity}@rkmobiles.com`;
                 }
 
                 try {
-                    await signInWithEmailAndPassword(auth, targetLoginCredential, cleanPass);
-                    setCurrentView('dashboard');
+                    await auth.signInWithEmailAndPassword(dynamicLoginTarget, passwordInput);
                 } catch (err) {
-                    setLoginError('Invalid access parameters or database mismatch.');
+                    setLoginError('Authentication mismatch. Verify system credentials.');
                 }
             };
 
-            // Process First Time Real Admin Setup Block
             const handleRegisterRealAdmin = async (e) => {
                 e.preventDefault();
-                
-                let finalEmail = adminCredential.trim();
-                let finalMobile = '';
+                let targetEmail = adminCredential.trim();
+                let targetMobile = '';
 
                 if (adminType === 'mobile') {
                     if (!/^\d{10}$/.test(adminCredential)) {
-                        alert("Please provide a valid 10-digit mobile sequence.");
+                        alert("Provide a valid 10-digit mobile layout.");
                         return;
                     }
-                    finalEmail = `${adminCredential}@rkmobiles.com`;
-                    finalMobile = adminCredential;
+                    targetEmail = `${adminCredential}@rkmobiles.com`;
+                    targetMobile = adminCredential;
                 }
 
                 try {
-                    // Create authentic login auth account inside your Firebase node
-                    const userCredential = await createUserWithEmailAndPassword(auth, finalEmail, adminPassword);
-                    const user = userCredential.user;
-
-                    // Write profile into Firestore database matching standard routing rules
-                    await setDoc(doc(db, "users", user.uid), {
-                        uid: user.uid,
+                    const userCredential = await auth.createUserWithEmailAndPassword(targetEmail, adminPassword);
+                    const documentKey = adminType === 'mobile' ? targetMobile : targetEmail.split('@')[0];
+                    
+                    await db.collection("users").doc(documentKey).set({
+                        uid: userCredential.user.uid,
                         name: "Master Admin",
-                        email: finalEmail,
-                        mobile: finalMobile,
+                        email: targetEmail,
+                        mobile: targetMobile,
                         role: "admin",
                         login_type: adminType,
                         created_at: new Date().toISOString()
                     });
 
-                    alert("Master account initialized successfully. Temporary login key destroyed.");
+                    alert("Master account initialized. Setup complete.");
                     setIsFirstTimeSetup(false);
-                    setCurrentView('dashboard');
-                } catch (err) {
-                    console.error(err);
-                    alert("Initialization failed: " + err.message);
+                } catch(err) {
+                    alert("Initialization error: " + err.message);
                 }
             };
 
-            // ================= INTERFACE RENDERING ROUTER =================
-            
-            // VIEW A: DYNAMIC DUAL INTERACTION LOGIN SCREEN
-            if (currentView === 'login') {
+            const handleCreateJobCard = async (e) => {
+                e.preventDefault();
+                const jobCardId = `JOB-${Math.floor(10000 + Math.random() * 90000)}`;
+
+                await db.collection("repair_jobs").doc(jobCardId).set({
+                    job_card_id: jobCardId,
+                    brand: formData.brand,
+                    model: formData.model,
+                    condition: formData.condition,
+                    repaired_cost: formData.cost,
+                    customer_name: formData.custName,
+                    customer_phone: formData.custPhone,
+                    issue_description: formData.issueDesc,
+                    status: 'Pending',
+                    assigned_tech_id: '',
+                    tech_notes: '',
+                    created_at: new Date().toISOString()
+                });
+
+                alert(`Dispatched Repair Ticket: ${jobCardId}`);
+                setFormData({ brand:'', model:'', condition:'', cost:'', custPhone:'', custName:'', issueDesc:'' });
+            };
+
+            const claimDevice = async (id) => {
+                await db.collection("repair_jobs").doc(id).update({ status: 'Under Process', assigned_tech_id: auth.currentUser.uid });
+            };
+            const transferDevice = async (id, techId) => {
+                if(!techId) return;
+                await db.collection("repair_jobs").doc(id).update({ assigned_tech_id: techId });
+                alert('Device assignment profile shifted successfully.');
+            };
+            const updateDeviceStatus = async (id, stat, notes) => {
+                await db.collection("repair_jobs").doc(id).update({ status: stat, tech_notes: notes });
+                alert('Operational state updated.');
+            };
+
+            if (currentRole === 'login') {
                 return (
                     <div class="min-h-screen flex items-center justify-center p-4">
-                        <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border border-gray-200">
-                            <div class="text-center mb-6">
-                                <h1 class="text-3xl font-extrabold text-blue-600 tracking-tight">RK Mobiles</h1>
-                                <p class="text-gray-500 text-sm mt-1">Management Terminal Console</p>
-                                {isFirstTimeSetup && (
-                                    <div class="mt-3 px-3 py-1 text-xs font-bold uppercase tracking-wider bg-amber-100 text-amber-800 rounded-full inline-block">
-                                        ⚠️ Setup Mode Enabled
+                        <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border">
+                            <h1 class="text-3xl font-extrabold text-blue-600 text-center">RK Mobiles</h1>
+                            <p class="text-gray-400 text-sm text-center mb-6">Repair Hub Terminal Portal</p>
+                            
+                            {isFirstTimeSetup && <div class="mb-4 text-center text-xs font-bold text-amber-700 bg-amber-50 p-2 border border-amber-200 rounded-lg">⚠️ First-Time DB Initialization Active</div>}
+                            {loginError && <div class="mb-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg border">{loginError}</div>}
+
+                            <form onSubmit={handleTerminalLogin} class="space-y-4">
+                                <input type="text" required value={identifierInput} onChange={(e)=>setIdentifierInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "Email or 10-Digit Phone"} class="w-full px-4 py-2 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" />
+                                <input type="password" required value={passwordInput} onChange={(e)=>setPasswordInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "Password"} class="w-full px-4 py-2 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" />
+                                <label class="flex items-center space-x-2 text-sm text-gray-600"><input type="checkbox" checked={rememberMe} onChange={(e)=>setRememberMe(e.target.checked)} class="rounded text-blue-600 shadow-sm" /><span>Remember me on this machine</span></label>
+                                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl transition">Unlock Terminal</button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (currentRole === 'setup-admin') {
+                return (
+                    <div class="min-h-screen flex items-center justify-center p-4">
+                        <form onSubmit={handleRegisterRealAdmin} class="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border space-y-4">
+                            <h2 class="text-xl font-bold">Configure Master Credentials</h2>
+                            <select value={adminType} onChange={(e)=>{setAdminType(e.target.value); setAdminCredential('');}} class="w-full p-2 border rounded-xl bg-gray-50">
+                                <option value="email">Standard Email Account</option>
+                                <option value="mobile">10-Digit Mobile Account</option>
+                            </select>
+                            <input type={adminType==='email'?'email':'tel'} required value={adminCredential} onChange={(e)=>setAdminCredential(e.target.value)} placeholder={adminType==='email'?'admin@rkmobiles.com':'9876543210'} class="w-full p-2 border rounded-xl" />
+                            <input type="password" required minlength="6" value={adminPassword} onChange={(e)=>setAdminPassword(e.target.value)} placeholder="Strong Password (Min 6 characters)" class="w-full p-2 border rounded-xl" />
+                            <button type="submit" class="w-full bg-purple-600 text-white py-2 rounded-xl font-bold">Commit Credentials</button>
+                        </form>
+                    </div>
+                );
+            }
+
+            if (currentRole === 'admin' || currentRole === 'developer') {
+                return (
+                    <div class="min-h-screen flex flex-col md:flex-row bg-gray-50">
+                        <div class="w-full md:w-64 bg-slate-900 text-white p-4 space-y-2">
+                            <h2 class="text-xl font-bold text-blue-400 p-2 mb-6">RK Workshop HQ</h2>
+                            {['create-job', 'tech-mgmt', 'user-mgmt', 'brand-mgmt', 'tracking'].map((tab) => (
+                                <button key={tab} onClick={()=>setActiveTab(tab)} class={`w-full text-left px-4 py-2 rounded transition capitalize ${activeTab === tab ? 'bg-blue-600' : 'hover:bg-slate-800'}`}>
+                                    {tab.replace('-', ' ')}
+                                </button>
+                            ))}
+                            <button onClick={()=>auth.signOut()} class="w-full text-left px-4 py-2 mt-12 text-red-400 hover:bg-slate-800 rounded">Disconnect Session</button>
+                        </div>
+
+                        <div class="flex-1 p-6">
+                            <div class="bg-white rounded-xl shadow p-6 min-h-[500px]">
+                                {activeTab === 'create-job' && (
+                                    <form onSubmit={handleCreateJobCard} class="space-y-4 max-w-lg">
+                                        <h3 class="text-xl font-bold border-b pb-2 mb-4">Generate Intake Job Card</h3>
+                                        <div class="grid grid-cols-2 gap-4">
+                                            <input type="text" placeholder="Brand Name" required value={formData.brand} onChange={(e)=>setFormData({...formData, brand: e.target.value})} class="p-2 border rounded" />
+                                            <input type="text" placeholder="Model Name" required value={formData.model} onChange={(e)=>setFormData({...formData, model: e.target.value})} class="p-2 border rounded" />
+                                        </div>
+                                        <input type="text" placeholder="Current Physical Condition" required value={formData.condition} onChange={(e)=>setFormData({...formData, condition: e.target.value})} class="w-full p-2 border rounded" />
+                                        <input type="text" placeholder="Estimated Repaired Cost" required value={formData.cost} onChange={(e)=>setFormData({...formData, cost: e.target.value})} class="w-full p-2 border rounded" />
+                                        <div class="grid grid-cols-2 gap-4">
+                                            <input type="text" placeholder="Customer Name" required value={formData.custName} onChange={(e)=>setFormData({...formData, custName: e.target.value})} class="p-2 border rounded" />
+                                            <input type="tel" placeholder="Customer Phone Number" required value={formData.custPhone} onChange={(e)=>setFormData({...formData, custPhone: e.target.value})} class="p-2 border rounded" />
+                                        </div>
+                                        <textarea placeholder="Specific Device Issue Description..." required rows="3" value={formData.issueDesc} onChange={(e)=>setFormData({...formData, issueDesc: e.target.value})} class="w-full p-2 border rounded"></textarea>
+                                        <button type="submit" class="bg-blue-600 text-white font-medium px-6 py-2 rounded-lg">Commit Job Ticket</button>
+                                    </form>
+                                )}
+
+                                {activeTab === 'tech-mgmt' && (
+                                    <div>
+                                        <h3 class="text-xl font-bold border-b pb-2 mb-4">Technician Management Roster</h3>
+                                        <div class="space-y-2">
+                                            {technicians.map((t, idx) => (
+                                                <div key={idx} class="p-3 border rounded-lg bg-gray-50 flex justify-between">
+                                                    <span class="font-bold text-gray-700">{t.name}</span>
+                                                    <span class="text-gray-400 text-sm">{t.email || t.mobile}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'user-mgmt' && (
+                                    <div>
+                                        <h3 class="text-xl font-bold border-b pb-2 mb-4">System Operator Access Level Setup</h3>
+                                        <form onSubmit={async (e) => {
+                                            e.preventDefault();
+                                            const name = e.target.uName.value.trim();
+                                            const type = e.target.uType.value;
+                                            const cred = e.target.uCred.value.trim();
+                                            const pass = e.target.uPass.value;
+                                            const role = e.target.uRole.value;
+
+                                            let fEmail = cred;
+                                            let fMobile = '';
+                                            if(type === 'mobile') {
+                                                fEmail = `${cred}@rkmobiles.com`;
+                                                fMobile = cred;
+                                            }
+
+                                            try {
+                                                const dKey = type === 'mobile' ? fMobile : fEmail.split('@')[0];
+                                                await db.collection("users").doc(dKey).set({
+                                                    uid: dKey, name, email: fEmail, mobile: fMobile, role, login_type: type, created_at: new Date().toISOString()
+                                                });
+                                                alert("User database profile registry node updated successfully.");
+                                                e.target.reset();
+                                            } catch(err) { alert("Execution error updating profile."); }
+                                        }} class="bg-slate-50 p-4 border rounded-xl space-y-4 max-w-md">
+                                            <input type="text" name="uName" placeholder="Staff Member Name" required class="w-full p-2 border bg-white rounded" />
+                                            <div class="grid grid-cols-2 gap-2">
+                                                <select name="uType" class="p-2 border bg-white rounded">
+                                                    <option value="email">Email</option>
+                                                    <option value="mobile">Mobile</option>
+                                                </select>
+                                                <input type="text" name="uCred" placeholder="Credential details" required class="p-2 border bg-white rounded" />
+                                            </div>
+                                            <input type="password" name="uPass" placeholder="Access Code (Password)" required class="w-full p-2 border bg-white rounded" />
+                                            <select name="uRole" class="w-full p-2 border bg-white rounded">
+                                                <option value="technician">Technician</option>
+                                                <option value="admin">Admin</option>
+                                                <option value="developer">Developer</option>
+                                            </select>
+                                            <button type="submit" class="w-full bg-purple-600 text-white py-2 rounded font-bold">Add Operator Profile</button>
+                                        </form>
+                                    </div>
+                                )}
+
+                                {activeTab === 'brand-mgmt' && (
+                                    <div>
+                                        <h3 class="text-xl font-bold border-b pb-2 mb-4">Brand & Model Roster Matrix</h3>
+                                        <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                            {allJobs.map((j, i) => (
+                                                <div key={i} class="p-3 bg-slate-50 border rounded-xl font-medium">
+                                                    🏢 {j.brand} <span class="text-blue-600 font-bold ml-1">→ {j.model}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'tracking' && (
+                                    <div>
+                                        <h3 class="text-xl font-bold border-b pb-2 mb-4">Master Operational Tracking Flow</h3>
+                                        <div class="space-y-2">
+                                            {allJobs.map(j => (
+                                                <div key={j.job_card_id} class="p-3 border rounded-xl flex justify-between items-center bg-gray-50 shadow-sm">
+                                                    <div>
+                                                        <span class="font-extrabold text-blue-600">{j.job_card_id}</span> - <span class="font-bold">{j.brand} {j.model}</span>
+                                                        <div class="text-xs text-gray-500 mt-0.5">Issue Profile: {j.issue_description}</div>
+                                                    </div>
+                                                    <span class="px-2.5 py-1 text-xs font-bold rounded-full bg-blue-100 text-blue-800 uppercase">{j.status}</span>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 )}
                             </div>
-
-                            {loginError && <div class="mb-4 p-3 bg-red-50 text-red-700 text-sm font-medium rounded-lg border border-red-200">{loginError}</div>}
-
-                            <form onSubmit={handleTerminalLogin} class="space-y-4">
-                                <div>
-                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Username / Mobile / Email</label>
-                                    <input type="text" required value={usernameInput} onChange={(e)=>setUsernameInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "Email or 10-digit Mobile"} class="w-full px-4 py-2 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" />
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Password</label>
-                                    <input type="password" required value={passwordInput} onChange={(e)=>setPasswordInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "••••••••"} class="w-full px-4 py-2 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" />
-                                </div>
-
-                                <div class="flex items-center">
-                                    <label class="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer select-none">
-                                        <input type="checkbox" checked={rememberMe} onChange={(e)=>setRememberMe(e.target.checked)} class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" />
-                                        <span>Keep terminal session logged in</span>
-                                    </label>
-                                </div>
-
-                                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl transition duration-200 shadow-md">
-                                    {isFirstTimeSetup ? "Access Setup Channel" : "Verify Identification"}
-                                </button>
-                            </form>
                         </div>
                     </div>
                 );
             }
 
-            // VIEW B: FIRST-TIME PERMANENT ADMIN REGISTRATION FORM
-            if (currentView === 'setup-admin') {
+            if (currentRole === 'technician') {
                 return (
-                    <div class="min-h-screen flex items-center justify-center p-4">
-                        <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border border-gray-200 space-y-6">
-                            <div>
-                                <h2 class="text-2xl font-bold text-gray-800">Initialize Security Credentials</h2>
-                                <p class="text-sm text-gray-500 mt-1">Convert your temporary profile into your permanent root production Admin account.</p>
+                    <div class="min-h-screen flex flex-col md:flex-row bg-gray-50">
+                        <div class="w-full md:w-64 bg-emerald-950 text-white p-4 space-y-2">
+                            <h2 class="text-xl font-bold text-emerald-400 p-2 mb-6">Repair Station</h2>
+                            {['available-jobs', 'transfer-desk', 'status-updater'].map((tab) => (
+                                <button key={tab} onClick={()=>setActiveTab(tab)} class={`w-full text-left px-4 py-2 rounded transition capitalize ${activeTab === tab ? 'bg-emerald-700' : 'hover:bg-emerald-900'}`}>
+                                    {tab.replace('-', ' ')}
+                                </button>
+                            ))}
+                            <button onClick={()=>auth.signOut()} class="w-full text-left px-4 py-2 mt-12 text-red-300 hover:bg-emerald-900 rounded">Log Out Terminal</button>
+                        </div>
+
+                        <div class="flex-1 p-6">
+                            <div class="bg-white rounded-xl shadow p-6 min-h-[500px]">
+                                {activeTab === 'available-jobs' && (
+                                    <div>
+                                        <h3 class="text-xl font-bold border-b pb-2 mb-4">Available Intake Repair Queues</h3>
+                                        <div class="grid gap-4 md:grid-cols-2">
+                                            {allJobs.filter(j => j.status === 'Pending').map(job => (
+                                                <div key={job.job_card_id} class="p-4 border rounded-xl bg-slate-50 flex flex-col justify-between shadow-sm">
+                                                    <div>
+                                                        <div class="font-bold text-lg text-gray-800">{job.brand} {job.model}</div>
+                                                        <div class="text-sm text-red-600 font-medium my-1">Problem: {job.issue_description}</div>
+                                                    </div>
+                                                    <button onClick={()=>claimDevice(job.job_card_id)} class="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 rounded-xl font-bold text-sm transition shadow-sm">Claim Ticket Box</button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'transfer-desk' && (
+                                    <div>
+                                        <h3 class="text-xl font-bold border-b pb-2 mb-4">Inter-Station Transfer Sub-desk</h3>
+                                        <div class="space-y-2">
+                                            {allJobs.filter(j => j.status === 'Under Process' && j.assigned_tech_id === auth.currentUser.uid).map(job => (
+                                                <div key={job.job_card_id} class="p-4 border rounded-xl flex justify-between items-center bg-gray-50">
+                                                    <span class="font-bold">{job.job_card_id} - {job.brand} {job.model}</span>
+                                                    <select onChange={(e)=>transferDevice(job.job_card_id, e.target.value)} class="p-1.5 border bg-white rounded-lg text-xs">
+                                                        <option value="">Route station parameter...</option>
+                                                        {technicians.filter(t => t.uid !== auth.currentUser.uid).map(t => (
+                                                            <option key={t.uid} value={t.uid}>{t.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'status-updater' && (
+                                    <div>
+                                        <h3 class="text-xl font-bold border-b pb-2 mb-4">Device Operational Rework Editor</h3>
+                                        <div class="space-y-4">
+                                            {allJobs.filter(j => j.status === 'Under Process' && j.assigned_tech_id === auth.currentUser.uid).map(job => {
+                                                let noteInputBuffer = '';
+                                                return (
+                                                    <div key={job.job_card_id} class="p-4 border rounded-xl bg-slate-50 space-y-3">
+                                                        <div class="font-bold">{job.job_card_id} — {job.brand} {job.model}</div>
+                                                        <input type="text" placeholder="Specify diagnostic execution context..." onChange={(e)=>noteInputBuffer = e.target.value} class="w-full p-2 border bg-white rounded-lg text-sm" />
+                                                        <div class="flex space-x-2">
+                                                            <button onClick={()=>updateDeviceStatus(job.job_card_id, 'Ready', noteInputBuffer)} class="flex-1 bg-green-600 text-white py-1.5 rounded-lg text-xs font-bold transition shadow-sm">Set Ready (Success)</button>
+                                                            <button onClick={()=>updateDeviceStatus(job.job_card_id, 'Returned', noteInputBuffer)} class="flex-1 bg-red-600 text-white py-1.5 rounded-lg text-xs font-bold transition shadow-sm">Set Returned (Failed)</button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-
-                            <form onSubmit={handleRegisterRealAdmin} class="space-y-4">
-                                <div>
-                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Credential Standard</label>
-                                    <select value={adminType} onChange={(e)=> { setAdminType(e.target.value); setAdminCredential(''); }} class="w-full p-2.5 border rounded-xl bg-gray-50 focus:bg-white">
-                                        <option value="email">Email Account</option>
-                                        <option value="mobile">Mobile Number (10-Digit)</option>
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">
-                                        {adminType === 'email' ? 'Admin Email Address' : 'Admin Mobile Number'}
-                                    </label>
-                                    <input type={adminType === 'email' ? 'email' : 'tel'} required value={adminCredential} onChange={(e)=>setAdminCredential(e.target.value)} placeholder={adminType === 'email' ? 'admin@rkmobiles.com' : '9876543210'} class="w-full px-4 py-2 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" />
-                                </div>
-
-                                <div>
-                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Secure Password</label>
-                                    <input type="password" required minlength="6" value={adminPassword} onChange={(e)=>setAdminPassword(e.target.value)} placeholder="Minimum 6 characters" class="w-full px-4 py-2 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" />
-                                </div>
-
-                                <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 rounded-xl transition shadow-md">
-                                    Commit Production Roster
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                );
-            }
-
-            // VIEW C: PLACEHOLDER MAIN WORKSPACE REDIRECT
-            if (currentView === 'dashboard') {
-                return (
-                    <div class="p-8 text-center space-y-4">
-                        <div class="bg-white max-w-md mx-auto p-6 rounded-xl shadow border">
-                            <h2 class="text-2xl font-bold text-emerald-600">Access Granted</h2>
-                            <p class="text-gray-600 text-sm mt-1">Terminal unlocked under active structural authentication parameters.</p>
-                            <button onClick={()=> { signOut(auth); setCurrentView('login'); }} class="mt-6 px-4 py-2 bg-gray-900 hover:bg-black text-white text-xs font-bold uppercase rounded-lg tracking-wider transition">
-                                Disconnect Session
-                            </button>
                         </div>
                     </div>
                 );
