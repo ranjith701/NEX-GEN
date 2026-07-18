@@ -36,15 +36,18 @@
             const [activeTab, setActiveTab] = React.useState('');
             const [loginError, setLoginError] = React.useState('');
             
-            const [usernameInput, setUsernameInput] = React.useState('');
+            // Login credentials and Remember Me state
+            const [usernameInput, setUsernameInput] = React.useState(() => localStorage.getItem('rememberedUsername') || '');
             const [passwordInput, setPasswordInput] = React.useState('');
-
+            const [rememberMe, setRememberMe] = React.useState(() => localStorage.getItem('rememberMe') === 'true');
+            
             const [availableRoles, setAvailableRoles] = React.useState([]);
 
-            // Phone-only first time admin registration state
+            // Setup state
             const [adminPhone, setAdminPhone] = React.useState('');
             const [adminPassword, setAdminPassword] = React.useState('');
 
+            // Customer quick tracking state
             const [searchQuery, setSearchQuery] = React.useState('');
             const [trackedJob, setTrackedJob] = React.useState(null);
             const [trackError, setTrackError] = React.useState('');
@@ -54,12 +57,14 @@
             const [usersList, setUsersList] = React.useState([]);
             const [formData, setFormData] = React.useState({ brand:'', model:'', condition:'', cost:'', custPhone:'', custName:'', issueDesc:'' });
 
+            // Check if application has database configurations initialized
             React.useEffect(() => {
                 db.collection("users").get().then((snap) => {
                     if (snap.empty) setIsFirstTimeSetup(true);
                 });
             }, []);
 
+            // Check auth state persistence
             React.useEffect(() => {
                 return auth.onAuthStateChanged(async (currentUser) => {
                     if (currentUser) {
@@ -88,8 +93,9 @@
                 });
             }, []);
 
+            // Handle live snapshot listeners when logged in
             React.useEffect(() => {
-                if (currentRole === 'login' || currentRole === 'setup-admin' || currentRole === 'select-role') return;
+                if (['login', 'setup-admin', 'select-role'].includes(currentRole)) return;
 
                 const unsubscribeJobs = db.collection("repair_jobs").onSnapshot((snap) => {
                     setAllJobs(snap.docs.map(d => d.data()));
@@ -110,6 +116,8 @@
                     setActiveTab('create-job');
                 } else if (selectedRole === 'technician') {
                     setActiveTab('available-jobs');
+                } else if (selectedRole === 'user') {
+                    setActiveTab('my-repairs');
                 }
             };
 
@@ -133,7 +141,15 @@
                     return;
                 }
 
-                // Internal fallback email mapping using phone digits to satisfy Firebase Auth layer structure
+                // Handle Username Retention Structure via LocalStorage
+                if (rememberMe) {
+                    localStorage.setItem('rememberedUsername', input);
+                    localStorage.setItem('rememberMe', 'true');
+                } else {
+                    localStorage.removeItem('rememberedUsername');
+                    localStorage.setItem('rememberMe', 'false');
+                }
+
                 const backendEmailTarget = `${input}@rkmobiles.com`;
 
                 try {
@@ -223,22 +239,25 @@
             const claimDevice = async (id) => {
                 await db.collection("repair_jobs").doc(id).update({ status: 'Under Process', assigned_tech_id: auth.currentUser.uid });
             };
+
             const transferDevice = async (id, techId) => {
                 if(!techId) return;
                 await db.collection("repair_jobs").doc(id).update({ assigned_tech_id: techId });
                 alert('Mobile transferred.');
             };
+
             const updateDeviceStatus = async (id, stat, notes) => {
                 await db.collection("repair_jobs").doc(id).update({ status: stat, tech_notes: notes });
                 alert('Status updated.');
             };
 
+            // BASE GATEWAY LAYER: INITIAL LANDING / ACCESS BLOCK
             if (currentRole === 'login') {
                 return (
                     <div class="min-h-screen flex items-center justify-center p-4">
                         <div class="max-w-4xl w-full grid md:grid-cols-2 gap-8 bg-white p-8 rounded-xl shadow border">
                             
-                            {/* Customer Status Tracker */}
+                            {/* Live Public Tracker */}
                             <div class="space-y-4 border-b md:border-b-0 md:border-r pb-6 md:pb-0 md:pr-8 flex flex-col justify-center">
                                 <h1 class="text-3xl font-bold text-blue-600">NEX-GEN</h1>
                                 <p class="text-gray-500 text-sm">Track your phone repair status live</p>
@@ -260,9 +279,9 @@
                                 )}
                             </div>
 
-                            {/* Staff Login Panel */}
+                            {/* Secure Authentication Form */}
                             <form onSubmit={handleLogin} class="space-y-4 flex flex-col justify-center">
-                                <h3 class="text-xl font-bold text-gray-800">Staff Access Portal</h3>
+                                <h3 class="text-xl font-bold text-gray-800">Staff & User Portal</h3>
                                 
                                 {isFirstTimeSetup && <div class="text-center text-xs font-bold text-amber-800 bg-amber-100 p-2 rounded">First-Time Setup Mode Active</div>}
                                 {loginError && <div class="p-3 bg-red-100 text-red-700 text-sm rounded">{loginError}</div>}
@@ -270,6 +289,11 @@
                                 <input type="text" required value={usernameInput} onChange={(e)=>setUsernameInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "10-Digit Mobile Number"} class="w-full p-2 border rounded outline-none focus:ring-2 focus:ring-blue-500" />
                                 <input type="password" required value={passwordInput} onChange={(e)=>setPasswordInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "Password"} class="w-full p-2 border rounded outline-none focus:ring-2 focus:ring-blue-500" />
                                 
+                                <div class="flex items-center">
+                                    <input id="remember-me" type="checkbox" checked={rememberMe} onChange={(e)=>setRememberMe(e.target.checked)} class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" />
+                                    <label htmlFor="remember-me" class="ml-2 block text-sm text-gray-900 select-none">Remember me</label>
+                                </div>
+
                                 <button type="submit" class="w-full bg-gray-900 text-white font-bold py-2 rounded hover:bg-black transition">Login</button>
                             </form>
                         </div>
@@ -312,6 +336,7 @@
                 );
             }
 
+            // ADMIN & DEVELOPER VIEW LAYER
             if (currentRole === 'admin' || currentRole === 'developer') {
                 return (
                     <div class="min-h-screen flex flex-col md:flex-row bg-gray-50">
@@ -383,9 +408,7 @@
 
                                             try {
                                                 let targetRolesArray = [role];
-                                                if (role === 'admin') {
-                                                    targetRolesArray = ['admin', 'technician'];
-                                                }
+                                                if (role === 'admin') targetRolesArray = ['admin', 'technician'];
 
                                                 await db.collection("users").doc(mobileNum).set({
                                                     uid: mobileNum, 
@@ -403,6 +426,7 @@
                                             <input type="tel" name="uMobile" placeholder="10-Digit Mobile Number" required class="w-full p-2 border bg-white rounded" />
                                             <input type="password" name="uPass" placeholder="Password" required class="w-full p-2 border bg-white rounded" />
                                             <select name="uRole" class="w-full p-2 border bg-white rounded">
+                                                <option value="user">User / Customer</option>
                                                 <option value="technician">Technician</option>
                                                 <option value="admin">Admin</option>
                                                 <option value="developer">Developer</option>
@@ -447,6 +471,7 @@
                 );
             }
 
+            // TECHNICIAN VIEW LAYER
             if (currentRole === 'technician') {
                 return (
                     <div class="min-h-screen flex flex-col md:flex-row bg-gray-50">
@@ -528,11 +553,55 @@
                     </div>
                 );
             }
+
+            // USER / CUSTOMER VIEW LAYER
+            if (currentRole === 'user') {
+                const userPhone = auth.currentUser.email.split('@')[0];
+                const myRepairs = allJobs.filter(j => j.customer_phone === userPhone);
+
+                return (
+                    <div class="min-h-screen flex flex-col md:flex-row bg-gray-50">
+                        <div class="w-full md:w-64 bg-blue-950 text-white p-4 space-y-2">
+                            <h2 class="text-xl font-bold text-blue-400 p-2 mb-2">Customer Panel</h2>
+                            <button onClick={()=>setActiveTab('my-repairs')} class={`w-full text-left px-4 py-2 rounded capitalize bg-blue-700`}>
+                                My Repairs
+                            </button>
+                            <button onClick={()=>auth.signOut()} class="w-full text-left px-4 py-2 mt-12 text-red-300 hover:bg-blue-900 rounded">Logout</button>
+                        </div>
+
+                        <div class="flex-1 p-6">
+                            <div class="bg-white rounded p-6 min-h-[500px] shadow">
+                                <h3 class="text-xl font-bold border-b pb-2 mb-4">Available Mobile Status</h3>
+                                {myRepairs.length === 0 ? (
+                                    <p class="text-gray-500 text-sm">No recorded repair tickets linked to this account.</p>
+                                ) : (
+                                    <div class="grid gap-4 md:grid-cols-2">
+                                        {myRepairs.map((job) => (
+                                            <div key={job.job_card_id} class="p-4 border rounded bg-slate-50 space-y-2 shadow-sm">
+                                                <div class="flex justify-between items-start">
+                                                    <span class="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{job.job_card_id}</span>
+                                                    <span class="px-2.5 py-0.5 text-xs font-bold rounded bg-amber-100 text-amber-800 uppercase">{job.status}</span>
+                                                </div>
+                                                <div class="text-lg font-bold text-gray-800">{job.brand} <span class="text-blue-600">{job.model}</span></div>
+                                                <div class="text-xs text-gray-600"><span class="font-semibold text-gray-700">Condition:</span> {job.condition}</div>
+                                                <div class="border-t pt-2 flex justify-between items-center text-sm">
+                                                    <span class="font-medium text-gray-500">Repaired Cost:</span>
+                                                    <span class="text-base font-bold text-emerald-600">₹{job.repaired_cost}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
         }
 
         const container = document.getElementById('root');
         const root = ReactDOM.createRoot(container);
-        root.render(<App />);
+        const root.render(<App />);
     </script>
 </body>
 </html>
