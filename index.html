@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile Repair Tracker</title>
+    <!-- Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="max-w-md w-full bg-white rounded-xl shadow-md p-6 space-y-8">
+        <h1 class="text-2xl font-bold text-center text-blue-600">🛠️ Mobile Repair Desk</h1>
+
+        <!-- ================= CUSTOMER TRACKING SECTION ================= -->
+        <section class="border-b pb-6">
+            <h2 class="text-lg font-semibold mb-3">Track Your Mobile Status</h2>
+            <div class="space-y-3">
+                <input type="text" id="trackInput" placeholder="Enter Job Card ID or Phone Number" 
+                       class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <button onclick="trackJob()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition">
+                    Check Status
+                </button>
+            </div>
+            <!-- Result Display -->
+            <div id="statusResult" class="mt-4 hidden p-4 rounded-lg text-center font-medium"></div>
+        </section>
+
+        <!-- ================= JOB INTAKE FORM (ADMIN / CUSTOMER) ================= -->
+        <section>
+            <h2 class="text-lg font-semibold mb-3">New Repair Intake</h2>
+            <form id="intakeForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-600 mb-1">Customer Phone</label>
+                    <input type="tel" id="custPhone" required class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-600 mb-1">Mobile Model</label>
+                    <input type="text" id="deviceModel" required placeholder="e.g., iPhone 14, Vivo V29" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-600 mb-1">Issue Description</label>
+                    <textarea id="issueDesc" required rows="3" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+                <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 rounded-lg transition">
+                    Generate Job Card
+                </button>
+            </form>
+        </section>
+    </div>
+
+    <!-- Firebase SDK Scripts -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
