@@ -35,17 +35,16 @@
             const [currentRole, setCurrentRole] = React.useState('login'); 
             const [activeTab, setActiveTab] = React.useState('');
             const [loginError, setLoginError] = React.useState('');
-            const [rememberMe, setRememberMe] = React.useState(false);
             
             const [usernameInput, setUsernameInput] = React.useState('');
             const [passwordInput, setPasswordInput] = React.useState('');
 
-            // First time admin configuration states
-            const [adminEmail, setAdminEmail] = React.useState('');
+            const [availableRoles, setAvailableRoles] = React.useState([]);
+
+            // Phone-only first time admin registration state
             const [adminPhone, setAdminPhone] = React.useState('');
             const [adminPassword, setAdminPassword] = React.useState('');
 
-            // Customer Tracking View States
             const [searchQuery, setSearchQuery] = React.useState('');
             const [trackedJob, setTrackedJob] = React.useState(null);
             const [trackError, setTrackError] = React.useState('');
@@ -64,31 +63,33 @@
             React.useEffect(() => {
                 return auth.onAuthStateChanged(async (currentUser) => {
                     if (currentUser) {
-                        const emailPrefix = currentUser.email.split('@')[0];
+                        const phonePrefix = currentUser.email.split('@')[0];
+                        let userDoc = await db.collection("users").doc(phonePrefix).get();
                         
-                        // Check if registered via phone prefix or direct email prefix matching logic
-                        let userDoc = await db.collection("users").doc(emailPrefix).get();
-                        
-                        if (!userDoc.exists) {
-                            // Secondary fallback scan if document name matches email key directly
-                            userDoc = await db.collection("users").doc(currentUser.email.replace(/[.#$\[\]]/g, "_")).get();
-                        }
-
                         if (userDoc.exists) {
                             const data = userDoc.data();
-                            setCurrentRole(data.role);
-                            if (data.role === 'admin' || data.role === 'developer') setActiveTab('create-job');
-                            else if (data.role === 'technician') setActiveTab('available-jobs');
+                            const rolesList = data.roles || (data.role ? [data.role] : []);
+                            
+                            if (rolesList.length > 1) {
+                                setAvailableRoles(rolesList);
+                                setCurrentRole('select-role');
+                            } else if (rolesList.length === 1) {
+                                routeToDashboard(rolesList[0]);
+                            } else {
+                                setLoginError('No access level assigned to this account.');
+                                auth.signOut();
+                            }
                         }
                     } else {
                         setCurrentRole('login');
                         setActiveTab('');
+                        setAvailableRoles([]);
                     }
                 });
             }, []);
 
             React.useEffect(() => {
-                if (currentRole === 'login' || currentRole === 'customer') return;
+                if (currentRole === 'login' || currentRole === 'setup-admin' || currentRole === 'select-role') return;
 
                 const unsubscribeJobs = db.collection("repair_jobs").onSnapshot((snap) => {
                     setAllJobs(snap.docs.map(d => d.data()));
@@ -97,11 +98,20 @@
                 const unsubscribeUsers = db.collection("users").onSnapshot((snap) => {
                     const users = snap.docs.map(d => d.data());
                     setUsersList(users);
-                    setTechnicians(users.filter(u => u.role === 'technician'));
+                    setTechnicians(users.filter(u => u.roles?.includes('technician') || u.role === 'technician'));
                 });
 
                 return () => { unsubscribeJobs(); unsubscribeUsers(); };
             }, [currentRole]);
+
+            const routeToDashboard = (selectedRole) => {
+                setCurrentRole(selectedRole);
+                if (selectedRole === 'admin' || selectedRole === 'developer') {
+                    setActiveTab('create-job');
+                } else if (selectedRole === 'technician') {
+                    setActiveTab('available-jobs');
+                }
+            };
 
             const handleLogin = async (e) => {
                 e.preventDefault();
@@ -118,21 +128,23 @@
                     }
                 }
 
-                let targetLogin = input;
-                if (/^\d{10}$/.test(input)) {
-                    targetLogin = `${input}@rkmobiles.com`;
+                if (!/^\d{10}$/.test(input)) {
+                    setLoginError('Enter a valid 10-digit mobile number.');
+                    return;
                 }
 
+                // Internal fallback email mapping using phone digits to satisfy Firebase Auth layer structure
+                const backendEmailTarget = `${input}@rkmobiles.com`;
+
                 try {
-                    await auth.signInWithEmailAndPassword(targetLogin, passwordInput);
+                    await auth.signInWithEmailAndPassword(backendEmailTarget, passwordInput);
                 } catch (err) {
-                    setLoginError('Wrong username or password.');
+                    setLoginError('Wrong mobile number or password.');
                 }
             };
 
             const handleRegisterAdmin = async (e) => {
                 e.preventDefault();
-                const cleanEmail = adminEmail.trim();
                 const cleanPhone = adminPhone.trim();
 
                 if (!/^\d{10}$/.test(cleanPhone)) {
@@ -140,22 +152,24 @@
                     return;
                 }
 
+                const setupEmailTarget = `${cleanPhone}@rkmobiles.com`;
+
                 try {
-                    const userCredential = await auth.createUserWithEmailAndPassword(cleanEmail, adminPassword);
+                    const userCredential = await auth.createUserWithEmailAndPassword(setupEmailTarget, adminPassword);
                     
                     await db.collection("users").doc(cleanPhone).set({
                         uid: userCredential.user.uid,
                         name: "Master Admin",
-                        email: cleanEmail,
                         mobile: cleanPhone,
                         role: "admin",
+                        roles: ["admin", "technician", "developer"],
                         created_at: new Date().toISOString()
                     });
 
                     alert("Admin account created successfully.");
                     setIsFirstTimeSetup(false);
-                    setCurrentRole('admin');
-                    setActiveTab('create-job');
+                    setAvailableRoles(["admin", "technician", "developer"]);
+                    setCurrentRole('select-role');
                 } catch(err) {
                     alert("Error: " + err.message);
                 }
@@ -224,7 +238,7 @@
                     <div class="min-h-screen flex items-center justify-center p-4">
                         <div class="max-w-4xl w-full grid md:grid-cols-2 gap-8 bg-white p-8 rounded-xl shadow border">
                             
-                            {/* Left View: Customer Public Tracker Layout */}
+                            {/* Customer Status Tracker */}
                             <div class="space-y-4 border-b md:border-b-0 md:border-r pb-6 md:pb-0 md:pr-8 flex flex-col justify-center">
                                 <h1 class="text-3xl font-bold text-blue-600">NEX-GEN</h1>
                                 <p class="text-gray-500 text-sm">Track your phone repair status live</p>
@@ -246,21 +260,16 @@
                                 )}
                             </div>
 
-                            {/* Right View: Login Dashboard Frame */}
+                            {/* Staff Login Panel */}
                             <form onSubmit={handleLogin} class="space-y-4 flex flex-col justify-center">
                                 <h3 class="text-xl font-bold text-gray-800">Staff Access Portal</h3>
                                 
                                 {isFirstTimeSetup && <div class="text-center text-xs font-bold text-amber-800 bg-amber-100 p-2 rounded">First-Time Setup Mode Active</div>}
                                 {loginError && <div class="p-3 bg-red-100 text-red-700 text-sm rounded">{loginError}</div>}
 
-                                <input type="text" required value={usernameInput} onChange={(e)=>setUsernameInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "Email or 10-Digit Phone"} class="w-full p-2 border rounded outline-none focus:ring-2 focus:ring-blue-500" />
+                                <input type="text" required value={usernameInput} onChange={(e)=>setUsernameInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "10-Digit Mobile Number"} class="w-full p-2 border rounded outline-none focus:ring-2 focus:ring-blue-500" />
                                 <input type="password" required value={passwordInput} onChange={(e)=>setPasswordInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "Password"} class="w-full p-2 border rounded outline-none focus:ring-2 focus:ring-blue-500" />
                                 
-                                <label class="flex items-center space-x-2 text-sm text-gray-600">
-                                    <input type="checkbox" checked={rememberMe} onChange={(e)=>setRememberMe(e.target.checked)} class="rounded text-blue-600" />
-                                    <span>Remember me</span>
-                                </label>
-
                                 <button type="submit" class="w-full bg-gray-900 text-white font-bold py-2 rounded hover:bg-black transition">Login</button>
                             </form>
                         </div>
@@ -273,10 +282,9 @@
                     <div class="min-h-screen flex items-center justify-center p-4">
                         <form onSubmit={handleRegisterAdmin} class="max-w-md w-full bg-white p-8 rounded-xl shadow border space-y-4">
                             <h2 class="text-xl font-bold text-gray-800">Create Admin Account</h2>
-                            <p class="text-sm text-gray-500">Provide both email and phone number setup configurations.</p>
+                            <p class="text-sm text-gray-500">Provide your mobile number to setup the master admin configuration.</p>
                             
-                            <input type="email" required value={adminEmail} onChange={(e)=>setAdminEmail(e.target.value)} placeholder="Admin Email Address" class="w-full p-2 border rounded" />
-                            <input type="tel" required value={adminPhone} onChange={(e)=>setAdminPhone(e.target.value)} placeholder="Admin 10-Digit Phone Number" class="w-full p-2 border rounded" />
+                            <input type="tel" required value={adminPhone} onChange={(e)=>setAdminPhone(e.target.value)} placeholder="Admin 10-Digit Mobile Number" class="w-full p-2 border rounded" />
                             <input type="password" required minlength="6" value={adminPassword} onChange={(e)=>setAdminPassword(e.target.value)} placeholder="Password (Min 6 characters)" class="w-full p-2 border rounded" />
                             
                             <button type="submit" class="w-full bg-purple-600 text-white py-2 rounded font-bold hover:bg-purple-700 transition">Save Admin</button>
@@ -285,11 +293,35 @@
                 );
             }
 
+            if (currentRole === 'select-role') {
+                return (
+                    <div class="min-h-screen flex items-center justify-center p-4">
+                        <div class="max-w-md w-full bg-white p-8 rounded-xl shadow border text-center space-y-6">
+                            <h2 class="text-2xl font-bold text-gray-800">Multiple Access Detected</h2>
+                            <p class="text-sm text-gray-500">Choose which dashboard workspace you want to enter:</p>
+                            <div class="space-y-3">
+                                {availableRoles.map((role) => (
+                                    <button key={role} onClick={() => routeToDashboard(role)} class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl capitalize transition shadow-sm">
+                                        Enter as {role}
+                                    </button>
+                                ))}
+                            </div>
+                            <button onClick={()=>auth.signOut()} class="text-sm text-red-500 hover:underline block mx-auto pt-2">Cancel and Logout</button>
+                        </div>
+                    </div>
+                );
+            }
+
             if (currentRole === 'admin' || currentRole === 'developer') {
                 return (
                     <div class="min-h-screen flex flex-col md:flex-row bg-gray-50">
                         <div class="w-full md:w-64 bg-slate-900 text-white p-4 space-y-2">
-                            <h2 class="text-xl font-bold text-blue-400 p-2 mb-6">NEX-GEN Admin</h2>
+                            <h2 class="text-xl font-bold text-blue-400 p-2 mb-2">NEX-GEN Admin</h2>
+                            {availableRoles.length > 1 && (
+                                <button onClick={() => setCurrentRole('select-role')} class="w-full text-xs text-left bg-slate-800 text-gray-300 px-4 py-1.5 rounded mb-4 hover:bg-slate-700">
+                                    🔄 Switch Access Level
+                                </button>
+                            )}
                             {['create-job', 'tech-mgmt', 'user-mgmt', 'brand-mgmt', 'tracking'].map((tab) => (
                                 <button key={tab} onClick={()=>setActiveTab(tab)} class={`w-full text-left px-4 py-2 rounded capitalize ${activeTab === tab ? 'bg-blue-600' : 'hover:bg-slate-800'}`}>
                                     {tab.replace('-', ' ')}
@@ -325,7 +357,7 @@
                                             {technicians.map((t, idx) => (
                                                 <div key={idx} class="p-3 border rounded bg-gray-50 flex justify-between">
                                                     <span class="font-bold text-gray-700">{t.name}</span>
-                                                    <span class="text-gray-500 text-sm">{t.email || t.mobile}</span>
+                                                    <span class="text-gray-500 text-sm">{t.mobile}</span>
                                                 </div>
                                             ))}
                                         </div>
@@ -338,35 +370,37 @@
                                         <form onSubmit={async (e) => {
                                             e.preventDefault();
                                             const name = e.target.uName.value.trim();
-                                            const type = e.target.uType.value;
-                                            const cred = e.target.uCred.value.trim();
+                                            const mobileNum = e.target.uMobile.value.trim();
                                             const pass = e.target.uPass.value;
                                             const role = e.target.uRole.value;
 
-                                            let fEmail = cred;
-                                            let fMobile = '';
-                                            if(type === 'mobile') {
-                                                fEmail = `${cred}@rkmobiles.com`;
-                                                fMobile = cred;
+                                            if(!/^\d{10}$/.test(mobileNum)) {
+                                                alert("Enter a valid 10-digit mobile number.");
+                                                return;
                                             }
 
+                                            const fakeEmail = `${mobileNum}@rkmobiles.com`;
+
                                             try {
-                                                const dKey = type === 'mobile' ? fMobile : fEmail.replace(/[.#$\[\]]/g, "_");
-                                                await db.collection("users").doc(dKey).set({
-                                                    uid: dKey, name, email: fEmail, mobile: fMobile, role, login_type: type, created_at: new Date().toISOString()
+                                                let targetRolesArray = [role];
+                                                if (role === 'admin') {
+                                                    targetRolesArray = ['admin', 'technician'];
+                                                }
+
+                                                await db.collection("users").doc(mobileNum).set({
+                                                    uid: mobileNum, 
+                                                    name, 
+                                                    mobile: mobileNum, 
+                                                    role: role, 
+                                                    roles: targetRolesArray,
+                                                    created_at: new Date().toISOString()
                                                 });
                                                 alert("User created successfully.");
                                                 e.target.reset();
                                             } catch(err) { alert("Error creating user profile."); }
                                         }} class="bg-slate-50 p-4 border rounded space-y-4 max-w-md">
                                             <input type="text" name="uName" placeholder="Name" required class="w-full p-2 border bg-white rounded" />
-                                            <div class="grid grid-cols-2 gap-2">
-                                                <select name="uType" class="p-2 border bg-white rounded">
-                                                    <option value="email">Email</option>
-                                                    <option value="mobile">Phone Number</option>
-                                                </select>
-                                                <input type="text" name="uCred" placeholder="Email or Phone Number" required class="p-2 border bg-white rounded" />
-                                            </div>
+                                            <input type="tel" name="uMobile" placeholder="10-Digit Mobile Number" required class="w-full p-2 border bg-white rounded" />
                                             <input type="password" name="uPass" placeholder="Password" required class="w-full p-2 border bg-white rounded" />
                                             <select name="uRole" class="w-full p-2 border bg-white rounded">
                                                 <option value="technician">Technician</option>
@@ -417,7 +451,12 @@
                 return (
                     <div class="min-h-screen flex flex-col md:flex-row bg-gray-50">
                         <div class="w-full md:w-64 bg-emerald-950 text-white p-4 space-y-2">
-                            <h2 class="text-xl font-bold text-emerald-400 p-2 mb-6">NEX-GEN Technician</h2>
+                            <h2 class="text-xl font-bold text-emerald-400 p-2 mb-2">NEX-GEN Tech</h2>
+                            {availableRoles.length > 1 && (
+                                <button onClick={() => setCurrentRole('select-role')} class="w-full text-xs text-left bg-emerald-900 text-emerald-200 px-4 py-1.5 rounded mb-4 hover:bg-emerald-800">
+                                    🔄 Switch Access Level
+                                </button>
+                            )}
                             {['available-jobs', 'transfer-desk', 'status-updater'].map((tab) => (
                                 <button key={tab} onClick={()=>setActiveTab(tab)} class={`w-full text-left px-4 py-2 rounded capitalize ${activeTab === tab ? 'bg-emerald-700' : 'hover:bg-emerald-900'}`}>
                                     {tab.replace('-', ' ')}
