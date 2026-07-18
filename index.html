@@ -3,53 +3,239 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mobile Repair Tracker</title>
-    <!-- Tailwind CSS for modern styling -->
+    <title>RK Mobiles - Terminal Access</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
-<body class="bg-gray-50 text-gray-800 min-h-screen flex flex-col items-center justify-center p-4">
+<body class="bg-gray-100 min-h-screen">
 
-    <div class="max-w-md w-full bg-white rounded-xl shadow-md p-6 space-y-8">
-        <h1 class="text-2xl font-bold text-center text-blue-600">🛠️ Mobile Repair Desk</h1>
+    <div id="root"></div>
 
-        <!-- ================= CUSTOMER TRACKING SECTION ================= -->
-        <section class="border-b pb-6">
-            <h2 class="text-lg font-semibold mb-3">Track Your Mobile Status</h2>
-            <div class="space-y-3">
-                <input type="text" id="trackInput" placeholder="Enter Job Card ID or Phone Number" 
-                       class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <button onclick="trackJob()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition">
-                    Check Status
-                </button>
-            </div>
-            <!-- Result Display -->
-            <div id="statusResult" class="mt-4 hidden p-4 rounded-lg text-center font-medium"></div>
-        </section>
+    <script type="text/babel">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        <!-- ================= JOB INTAKE FORM (ADMIN / CUSTOMER) ================= -->
-        <section>
-            <h2 class="text-lg font-semibold mb-3">New Repair Intake</h2>
-            <form id="intakeForm" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Customer Phone</label>
-                    <input type="tel" id="custPhone" required class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Mobile Model</label>
-                    <input type="text" id="deviceModel" required placeholder="e.g., iPhone 14, Vivo V29" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Issue Description</label>
-                    <textarea id="issueDesc" required rows="3" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-                </div>
-                <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 rounded-lg transition">
-                    Generate Job Card
-                </button>
-            </form>
-        </section>
-    </div>
+        // ================= CHANGE THIS WITH YOUR FIREBASE CREDENTIALS =================
+        const firebaseConfig = {
+  apiKey: "AIzaSyD34O_POEwS40AhVi01QLWIkYbU9Si6E7Q",
+  authDomain: "nex-gen-46e49.firebaseapp.com",
+  projectId: "nex-gen-46e49",
+  storageBucket: "nex-gen-46e49.firebasestorage.app",
+  messagingSenderId: "745169266255",
+  appId: "1:745169266255:web:6798e993ff7c1027da6c3a"
+};
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
 
-    <!-- Firebase SDK Scripts -->
-    <script type="module" src="app.js"></script>
+        function App() {
+            const [isFirstTimeSetup, setIsFirstTimeSetup] = React.useState(false);
+            const [currentView, setCurrentView] = React.useState('login'); // 'login', 'setup-admin', 'dashboard'
+            const [rememberMe, setRememberMe] = React.useState(false);
+            const [loginError, setLoginError] = React.useState('');
+            
+            // Input references
+            const [usernameInput, setUsernameInput] = React.useState('');
+            const [passwordInput, setPasswordInput] = React.useState('');
+
+            // Setup Form States
+            const [adminType, setAdminType] = React.useState('email'); // 'email' or 'mobile'
+            const [adminCredential, setAdminCredential] = React.useState('');
+            const [adminPassword, setAdminPassword] = React.useState('');
+
+            // Check if any admin exists in database on startup
+            React.useEffect(() => {
+                const checkAdminStatus = async () => {
+                    const querySnapshot = await getDocs(collection(db, "users"));
+                    // If no users exist in the collection, initialize first-time entry parameters
+                    if (querySnapshot.empty) {
+                        setIsFirstTimeSetup(true);
+                    }
+                };
+                checkAdminStatus();
+            }, []);
+
+            // Master Auth Login Router
+            const handleTerminalLogin = async (e) => {
+                e.preventDefault();
+                setLoginError('');
+
+                const cleanUser = usernameInput.trim();
+                const cleanPass = passwordInput;
+
+                // 1. First time override logic pathway
+                if (isFirstTimeSetup) {
+                    if (cleanUser === 'admin' && cleanPass === 'admin') {
+                        setCurrentView('setup-admin'); // Force redirect to registration screen
+                        return;
+                    } else {
+                        setLoginError('First-time setup active. Use fallback administrative credentials.');
+                        return;
+                    }
+                }
+
+                // 2. Standard production login pathway (Email & Phone normalization)
+                let targetLoginCredential = cleanUser;
+                if (/^\d{10}$/.test(cleanUser)) {
+                    targetLoginCredential = `${cleanUser}@rkmobiles.com`;
+                }
+
+                try {
+                    await signInWithEmailAndPassword(auth, targetLoginCredential, cleanPass);
+                    setCurrentView('dashboard');
+                } catch (err) {
+                    setLoginError('Invalid access parameters or database mismatch.');
+                }
+            };
+
+            // Process First Time Real Admin Setup Block
+            const handleRegisterRealAdmin = async (e) => {
+                e.preventDefault();
+                
+                let finalEmail = adminCredential.trim();
+                let finalMobile = '';
+
+                if (adminType === 'mobile') {
+                    if (!/^\d{10}$/.test(adminCredential)) {
+                        alert("Please provide a valid 10-digit mobile sequence.");
+                        return;
+                    }
+                    finalEmail = `${adminCredential}@rkmobiles.com`;
+                    finalMobile = adminCredential;
+                }
+
+                try {
+                    // Create authentic login auth account inside your Firebase node
+                    const userCredential = await createUserWithEmailAndPassword(auth, finalEmail, adminPassword);
+                    const user = userCredential.user;
+
+                    // Write profile into Firestore database matching standard routing rules
+                    await setDoc(doc(db, "users", user.uid), {
+                        uid: user.uid,
+                        name: "Master Admin",
+                        email: finalEmail,
+                        mobile: finalMobile,
+                        role: "admin",
+                        login_type: adminType,
+                        created_at: new Date().toISOString()
+                    });
+
+                    alert("Master account initialized successfully. Temporary login key destroyed.");
+                    setIsFirstTimeSetup(false);
+                    setCurrentView('dashboard');
+                } catch (err) {
+                    console.error(err);
+                    alert("Initialization failed: " + err.message);
+                }
+            };
+
+            // ================= INTERFACE RENDERING ROUTER =================
+            
+            // VIEW A: DYNAMIC DUAL INTERACTION LOGIN SCREEN
+            if (currentView === 'login') {
+                return (
+                    <div class="min-h-screen flex items-center justify-center p-4">
+                        <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border border-gray-200">
+                            <div class="text-center mb-6">
+                                <h1 class="text-3xl font-extrabold text-blue-600 tracking-tight">RK Mobiles</h1>
+                                <p class="text-gray-500 text-sm mt-1">Management Terminal Console</p>
+                                {isFirstTimeSetup && (
+                                    <div class="mt-3 px-3 py-1 text-xs font-bold uppercase tracking-wider bg-amber-100 text-amber-800 rounded-full inline-block">
+                                        ⚠️ Setup Mode Enabled
+                                    </div>
+                                )}
+                            </div>
+
+                            {loginError && <div class="mb-4 p-3 bg-red-50 text-red-700 text-sm font-medium rounded-lg border border-red-200">{loginError}</div>}
+
+                            <form onSubmit={handleTerminalLogin} class="space-y-4">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Username / Mobile / Email</label>
+                                    <input type="text" required value={usernameInput} onChange={(e)=>setUsernameInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "Email or 10-digit Mobile"} class="w-full px-4 py-2 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" />
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Password</label>
+                                    <input type="password" required value={passwordInput} onChange={(e)=>setPasswordInput(e.target.value)} placeholder={isFirstTimeSetup ? "Enter 'admin'" : "••••••••"} class="w-full px-4 py-2 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" />
+                                </div>
+
+                                <div class="flex items-center">
+                                    <label class="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer select-none">
+                                        <input type="checkbox" checked={rememberMe} onChange={(e)=>setRememberMe(e.target.checked)} class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" />
+                                        <span>Keep terminal session logged in</span>
+                                    </label>
+                                </div>
+
+                                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl transition duration-200 shadow-md">
+                                    {isFirstTimeSetup ? "Access Setup Channel" : "Verify Identification"}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            // VIEW B: FIRST-TIME PERMANENT ADMIN REGISTRATION FORM
+            if (currentView === 'setup-admin') {
+                return (
+                    <div class="min-h-screen flex items-center justify-center p-4">
+                        <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border border-gray-200 space-y-6">
+                            <div>
+                                <h2 class="text-2xl font-bold text-gray-800">Initialize Security Credentials</h2>
+                                <p class="text-sm text-gray-500 mt-1">Convert your temporary profile into your permanent root production Admin account.</p>
+                            </div>
+
+                            <form onSubmit={handleRegisterRealAdmin} class="space-y-4">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Credential Standard</label>
+                                    <select value={adminType} onChange={(e)=> { setAdminType(e.target.value); setAdminCredential(''); }} class="w-full p-2.5 border rounded-xl bg-gray-50 focus:bg-white">
+                                        <option value="email">Email Account</option>
+                                        <option value="mobile">Mobile Number (10-Digit)</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">
+                                        {adminType === 'email' ? 'Admin Email Address' : 'Admin Mobile Number'}
+                                    </label>
+                                    <input type={adminType === 'email' ? 'email' : 'tel'} required value={adminCredential} onChange={(e)=>setAdminCredential(e.target.value)} placeholder={adminType === 'email' ? 'admin@rkmobiles.com' : '9876543210'} class="w-full px-4 py-2 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" />
+                                </div>
+
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Secure Password</label>
+                                    <input type="password" required minlength="6" value={adminPassword} onChange={(e)=>setAdminPassword(e.target.value)} placeholder="Minimum 6 characters" class="w-full px-4 py-2 border rounded-xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" />
+                                </div>
+
+                                <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 rounded-xl transition shadow-md">
+                                    Commit Production Roster
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            // VIEW C: PLACEHOLDER MAIN WORKSPACE REDIRECT
+            if (currentView === 'dashboard') {
+                return (
+                    <div class="p-8 text-center space-y-4">
+                        <div class="bg-white max-w-md mx-auto p-6 rounded-xl shadow border">
+                            <h2 class="text-2xl font-bold text-emerald-600">Access Granted</h2>
+                            <p class="text-gray-600 text-sm mt-1">Terminal unlocked under active structural authentication parameters.</p>
+                            <button onClick={()=> { signOut(auth); setCurrentView('login'); }} class="mt-6 px-4 py-2 bg-gray-900 hover:bg-black text-white text-xs font-bold uppercase rounded-lg tracking-wider transition">
+                                Disconnect Session
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+        }
+
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<App />);
+    </script>
 </body>
 </html>
